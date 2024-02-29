@@ -414,7 +414,7 @@ class TorchNormalizer(InitialParameterRepresenterMixIn, BaseEstimator, Transform
 
                 * None (default): No transformation of values
                 * log: Estimate in log-space leading to a multiplicative model
-                * log1p: Estimate in log-space but add 1 to values before transforming for stability
+                * logp1: Estimate in log-space but add 1 to values before transforming for stability
                   (e.g. if many small values <<1 are present).
                   Note, that inverse transform is still only `torch.exp()` and not `torch.expm1()`.
                 * logit: Apply logit transformation on values that are between 0 and 1
@@ -551,9 +551,12 @@ class TorchNormalizer(InitialParameterRepresenterMixIn, BaseEstimator, Transform
         center = target_scale[..., 0]
         scale = target_scale[..., 1]
         if y.ndim > center.ndim:  # multiple batches -> expand size
-            center = center.view(*center.size(), *(1,) * (y.ndim - center.ndim))
-            scale = scale.view(*scale.size(), *(1,) * (y.ndim - scale.ndim))
+            # center = center.view(*center.size(), *(1,) * (y.ndim - center.ndim))
+            # scale = scale.view(*scale.size(), *(1,) * (y.ndim - scale.ndim))
 
+            center = center.reshape(*center.shape, *(1,) * (y.ndim - center.ndim))  #print 多分これでおｋ
+            scale = scale.reshape(*scale.shape, *(1,) * (y.ndim - scale.ndim))
+            
         # transform
         dtype = y.dtype
         y = (y - center) / scale
@@ -646,7 +649,7 @@ class EncoderNormalizer(TorchNormalizer):
 
                 * None (default): No transformation of values
                 * log: Estimate in log-space leading to a multiplicative model
-                * log1p: Estimate in log-space but add 1 to values before transforming for stability
+                * logp1: Estimate in log-space but add 1 to values before transforming for stability
                     (e.g. if many small values <<1 are present).
                     Note, that inverse transform is still only `torch.exp()` and not `torch.expm1()`.
                 * logit: Apply logit transformation on values that are between 0 and 1
@@ -753,7 +756,7 @@ class GroupNormalizer(TorchNormalizer):
 
                 * None (default): No transformation of values
                 * log: Estimate in log-space leading to a multiplicative model
-                * log1p: Estimate in log-space but add 1 to values before transforming for stability
+                * logp1: Estimate in log-space but add 1 to values before transforming for stability
                     (e.g. if many small values <<1 are present).
                     Note, that inverse transform is still only `torch.exp()` and not `torch.expm1()`.
                 * logit: Apply logit transformation on values that are between 0 and 1

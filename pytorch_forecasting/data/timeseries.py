@@ -22,6 +22,7 @@ from torch.nn.utils import rnn
 from torch.utils.data import DataLoader, Dataset
 from torch.utils.data.sampler import Sampler, SequentialSampler
 
+
 from pytorch_forecasting.data.encoders import (
     EncoderNormalizer,
     GroupNormalizer,
@@ -197,7 +198,7 @@ class TimeSeriesDataSet(Dataset):
         add_relative_time_idx: bool = False,
         add_target_scales: bool = False,
         add_encoder_length: Union[bool, str] = "auto",
-        target_normalizer: Union[NORMALIZER, str, List[NORMALIZER], Tuple[NORMALIZER], None] = "auto",
+        target_normalizer: Union[NORMALIZER, str, List[NORMALIZER], Tuple[NORMALIZER]] = "auto",
         categorical_encoders: Dict[str, NaNLabelEncoder] = {},
         scalers: Dict[str, Union[StandardScaler, RobustScaler, TorchNormalizer, EncoderNormalizer]] = {},
         randomize_length: Union[None, Tuple[float, float], bool] = False,
@@ -291,7 +292,7 @@ class TimeSeriesDataSet(Dataset):
                 the index will range from -encoder_length to prediction_length)
             add_target_scales (bool): if to add scales for target to static real features (i.e. add the center and scale
                 of the unnormalized timeseries as features)
-            add_encoder_length (bool): if to add encoder length to list of static real variables.
+            add_encoder_length (bool): if to add decoder length to list of static real variables.
                 Defaults to "auto", i.e. ``True`` if ``min_encoder_length != max_encoder_length``.
             target_normalizer (Union[TorchNormalizer, NaNLabelEncoder, EncoderNormalizer, str, list, tuple]):
                 transformer that take group_ids, target and time_idx to normalize targets.
@@ -329,6 +330,7 @@ class TimeSeriesDataSet(Dataset):
         """
         super().__init__()
         self.max_encoder_length = max_encoder_length
+
         assert isinstance(self.max_encoder_length, int), "max encoder length must be integer"
         if min_encoder_length is None:
             min_encoder_length = max_encoder_length
@@ -1213,7 +1215,6 @@ class TimeSeriesDataSet(Dataset):
                 It contains a list of all possible subsequences.
         """
         g = data.groupby(self._group_ids, observed=True)
-
         df_index_first = g["__time_idx__"].transform("first").to_frame("time_first")
         df_index_last = g["__time_idx__"].transform("last").to_frame("time_last")
         df_index_diff_to_next = -g["__time_idx__"].diff(-1).fillna(-1).astype(int).to_frame("time_diff_to_next")
@@ -1236,12 +1237,14 @@ class TimeSeriesDataSet(Dataset):
             assert (
                 self.allow_missing_timesteps
             ), "Time difference between steps has been idenfied as larger than 1 - set allow_missing_timesteps=True"
-
         df_index["index_end"], missing_sequences = _find_end_indices(
             diffs=df_index.time_diff_to_next.to_numpy(),
-            max_lengths=(max_time - df_index.time).to_numpy() + 1,
+            max_lengths=((max_time - df_index.time).to_numpy() + 1),
             min_length=min_sequence_length,
         )
+        
+
+        
         # add duplicates but mostly with shorter sequence length for start of timeseries
         # while the previous steps have ensured that we start a sequence on every time step, the missing_sequences
         # ensure that there is a sequence that finishes on every timestep
@@ -1250,10 +1253,16 @@ class TimeSeriesDataSet(Dataset):
 
             # concatenate shortened sequences
             df_index = pd.concat([df_index, shortened_sequences], axis=0, ignore_index=True)
+            
+        # 条件式を変数に格納 # 本当はこれらはなし
+        condition = df_index.index_end - df_index.index_start + 1 > self.max_encoder_length + self.max_prediction_length
+        # 条件を満たす場合、index_end を調整
+        df_index.loc[condition, 'index_end'] = df_index.index_start[condition] + self.max_encoder_length + self.max_prediction_length - 1
 
         # filter out where encode and decode length are not satisfied
-        df_index["sequence_length"] = df_index["time"].iloc[df_index["index_end"]].to_numpy() - df_index["time"] + 1
-
+        # df_index["sequence_length"] = df_index["time"].iloc[df_index["index_end"]].to_numpy() - df_index["time"] + 1
+        df_index["sequence_length"] = (df_index.index_end - df_index.index_start + 1) #本当は上の業のやつ
+        
         # filter too short sequences
         df_index = df_index[
             # sequence must be at least of minimal prediction length
@@ -1462,7 +1471,7 @@ class TimeSeriesDataSet(Dataset):
                     sequence_length - self.min_encoder_length,
                 ],
                 axis=0,
-            ).clip(max=self.max_prediction_length)
+            ).clip(min=self.min_prediction_length, max=self.max_prediction_length)  # minを加えた
         return decoder_length
 
     def __getitem__(self, idx: int) -> Tuple[Dict[str, torch.Tensor], torch.Tensor]:
@@ -1559,8 +1568,6 @@ class TimeSeriesDataSet(Dataset):
                 data_cat = data_cat[encoder_length - new_encoder_length : encoder_length + new_decoder_length]
                 data_cont = data_cont[encoder_length - new_encoder_length : encoder_length + new_decoder_length]
                 target = [t[encoder_length - new_encoder_length : encoder_length + new_decoder_length] for t in target]
-                if weight is not None:
-                    weight = weight[encoder_length - new_encoder_length : encoder_length + new_decoder_length]
                 encoder_length = new_encoder_length
                 decoder_length = new_decoder_length
 
